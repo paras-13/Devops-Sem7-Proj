@@ -1,0 +1,25 @@
+# Terraform
+# Ignore all secret variable files
+*.tfvars
+
+*.tfstate
+*.tfstate.backup
+
+
+.terraform/
+
+
+node_modules/
+api/node_modules/
+frontend/node_modules/
+
+
+.env
+api/.env
+frontend/.env
+
+frontend/dist/
+frontend/build/
+api/dist/
+
+.DS_Store
