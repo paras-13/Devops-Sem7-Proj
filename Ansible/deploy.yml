@@ -1,0 +1,211 @@
+---
+- name: Deploy Full-Stack Application on Ubuntu (Node 20 + PM2 + Nginx)
+  hosts: aws_ec2
+  become: yes
+
+  vars:
+    node_version: "20"
+    app_user: "ubuntu"
+    app_user_home: "/home/{{ app_user }}"
+
+    git_repo_url: "https://github.com/paras-13/Devops-Sem7-Proj.git"
+    app_home_dir: "{{ app_user_home }}/varta-app"
+
+    backend_dir: "{{ app_home_dir }}/api"
+    frontend_dir: "{{ app_home_dir }}/frontend"
+    frontend_dist_dir: "{{ frontend_dir }}/dist"
+
+    backend_start_script: "index.js"
+
+    nvm_dir: "{{ app_user_home }}/.nvm"
+    nvm_script: "{{ nvm_dir }}/nvm.sh"
+    nvm_command_prefix: "source {{ nvm_script }} && "
+
+  vars_files:
+    - secrets.yml
+
+  tasks:
+    # ----------------------------------------------------
+    # 1. Install System Dependencies
+    # ----------------------------------------------------
+    - name: Update APT cache
+      ansible.builtin.apt:
+        update_cache: yes
+
+    - name: Install base packages
+      ansible.builtin.apt:
+        name:
+          - git
+          - curl
+          - build-essential
+          - nginx
+        state: present
+
+    # ----------------------------------------------------
+    # 2. Install NVM
+    # ----------------------------------------------------
+    - name: Download NVM installation script
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh
+        dest: /tmp/install_nvm.sh
+        mode: "0755"
+      become_user: "{{ app_user }}"
+
+    - name: Run NVM installation script
+      ansible.builtin.shell: /tmp/install_nvm.sh
+      args:
+        creates: "{{ nvm_script }}"
+        executable: /bin/bash
+      become_user: "{{ app_user }}"
+
+    # ----------------------------------------------------
+    # 3. Install Node.js (20) via NVM
+    # ----------------------------------------------------
+    - name: Install Node.js {{ node_version }} via NVM
+      ansible.builtin.shell: "{{ nvm_command_prefix }} nvm install {{ node_version }}"
+      args:
+        creates: "{{ nvm_dir }}/versions/node/v{{ node_version }}.*"
+        executable: /bin/bash
+      become_user: "{{ app_user }}"
+
+    - name: Set Node.js {{ node_version }} as default
+      ansible.builtin.shell: "{{ nvm_command_prefix }} nvm alias default {{ node_version }}"
+      args:
+        executable: /bin/bash
+      become_user: "{{ app_user }}"
+
+    - name: Install PM2 globally
+      ansible.builtin.shell: "{{ nvm_command_prefix }} npm install -g pm2"
+      args:
+        creates: "{{ nvm_dir }}/versions/node/v{{ node_version }}/bin/pm2"
+        executable: /bin/bash
+      become_user: "{{ app_user }}"
+
+    # ----------------------------------------------------
+    # 4. Clone Repository
+    # ----------------------------------------------------
+    - name: Clone (or update) the application repository
+      ansible.builtin.git:
+        repo: "{{ git_repo_url }}"
+        dest: "{{ app_home_dir }}"
+        version: main
+        force: yes
+      become_user: "{{ app_user }}"
+
+    # ----------------------------------------------------
+    # 5. Create .env Files
+    # ----------------------------------------------------
+    - name: Create backend .env
+      ansible.builtin.template:
+        src: backend.env.j2
+        dest: "{{ backend_dir }}/.env"
+        owner: "{{ app_user }}"
+        mode: "0600"
+
+    - name: Create frontend .env
+      ansible.builtin.template:
+        src: frontend.env.j2
+        dest: "{{ frontend_dir }}/.env"
+        owner: "{{ app_user }}"
+        mode: "0600"
+
+    # ----------------------------------------------------
+    # 6. Install Dependencies
+    # ----------------------------------------------------
+    - name: Install frontend dependencies
+      ansible.builtin.shell: "{{ nvm_command_prefix }} npm ci"
+      args:
+        chdir: "{{ frontend_dir }}"
+        executable: /bin/bash
+      become_user: "{{ app_user }}"
+
+    - name: Install backend dependencies
+      ansible.builtin.shell: "{{ nvm_command_prefix }} npm install"
+      args:
+        chdir: "{{ backend_dir }}"
+        executable: /bin/bash
+      become_user: "{{ app_user }}"
+
+    # ----------------------------------------------------
+    # 7. Build Frontend
+    # ----------------------------------------------------
+    - name: Remove old dist directory
+      ansible.builtin.file:
+        path: "{{ frontend_dist_dir }}"
+        state: absent
+
+    - name: Build frontend
+      ansible.builtin.shell: "{{ nvm_command_prefix }} npm run build"
+      args:
+        chdir: "{{ frontend_dir }}"
+        executable: /bin/bash
+      become_user: "{{ app_user }}"
+
+    # ----------------------------------------------------
+    # 7.5 FIX NGINX PERMISSIONS (IMPORTANT!)
+    # ----------------------------------------------------
+    - name: Allow Nginx to traverse ubuntu home directory
+      ansible.builtin.file:
+        path: "/home/{{ app_user }}"
+        mode: "0755"
+
+    - name: Allow Nginx to traverse varta-app directory
+      ansible.builtin.file:
+        path: "{{ app_home_dir }}"
+        mode: "0755"
+
+    - name: Allow Nginx to traverse frontend directory
+      ansible.builtin.file:
+        path: "{{ frontend_dir }}"
+        mode: "0755"
+
+    - name: Allow Nginx to read frontend build directory
+      ansible.builtin.file:
+        path: "{{ frontend_dist_dir }}"
+        recurse: yes
+        mode: "0755"
+
+    # ----------------------------------------------------
+    # 8. Start Backend using PM2
+    # ----------------------------------------------------
+    - name: Start/Restart backend with PM2
+      ansible.builtin.shell: |
+        {{ nvm_command_prefix }} pm2 start {{ backend_start_script }} --name api --update-env -f
+      args:
+        chdir: "{{ backend_dir }}"
+        executable: /bin/bash
+      become_user: "{{ app_user }}"
+      changed_when: false
+
+    - name: Save PM2 processes
+      ansible.builtin.shell: "{{ nvm_command_prefix }} pm2 save"
+      args:
+        executable: /bin/bash
+      become_user: "{{ app_user }}"
+      changed_when: false
+
+    # ----------------------------------------------------
+    # 9. Configure Nginx
+    # ----------------------------------------------------
+    - name: Remove default Nginx config
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+      ignore_errors: yes
+
+    - name: Create Nginx config
+      ansible.builtin.template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/sites-available/varta.conf
+
+    - name: Enable Varta site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/varta.conf
+        dest: /etc/nginx/sites-enabled/varta.conf
+        state: link
+
+    - name: Restart nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
+        enabled: yes

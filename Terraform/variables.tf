@@ -7,13 +7,13 @@ variable "aws_region" {
 variable "app_server_ami" {
   description = "AMI for the App Server"
   type        = string
-  default     = "ami-0059e0da390478151"
+  default     = "ami-087d1c9a513324697"
 }
 
 variable "mgmt_server_ami" {
   description = "AMI for the Management Server"
   type        = string
-  default     = "ami-0059e0da390478151" 
+  default     = "ami-087d1c9a513324697" 
 }
 
 variable "instance_type" {
