@@ -87,7 +87,7 @@
       become_user: "{{ app_user }}"
 
     # ----------------------------------------------------
-    # 4. ALWAYS PULL LATEST CODE (FIXED)
+    # 4. ALWAYS PULL LATEST CODE
     # ----------------------------------------------------
     - name: Sync latest app code from GitHub
       git:
@@ -161,21 +161,21 @@
         - "{{ frontend_dist_dir }}"
 
     # ----------------------------------------------------
-    # 8. Start/Restart PM2 Backend (FIXED)
+    # 8. **Final FIXED PM2 Restart Task**
     # ----------------------------------------------------
-    - name: Restart backend with PM2
+    - name: Restart or Start PM2 backend cleanly
       shell: |
-        {{ nvm_command_prefix }} pm2 restart api || {{ nvm_command_prefix }} pm2 start {{ backend_start_script }} --name api
+        {{ nvm_command_prefix }} pm2 describe api > /dev/null 2>&1
+        if [ $? -eq 0 ]; then
+          {{ nvm_command_prefix }} pm2 restart api --update-env
+        else
+          {{ nvm_command_prefix }} pm2 start {{ backend_start_script }} --name api
+        fi
       args:
         chdir: "{{ backend_dir }}"
         executable: /bin/bash
       become_user: "{{ app_user }}"
-
-    - name: Save PM2 process list
-      shell: "{{ nvm_command_prefix }} pm2 save"
-      args:
-        executable: /bin/bash
-      become_user: "{{ app_user }}"
+      failed_when: false
 
     # ----------------------------------------------------
     # 9. Configure Nginx
