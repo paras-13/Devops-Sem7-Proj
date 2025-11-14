@@ -1,0 +1,41 @@
+define host {
+  use                     linux-server
+  host_name               app_server
+  alias                   Application Server
+  address                 {{ hostvars[groups['app_server'][0]].inventory_hostname }}
+}
+
+define service {
+  use                     generic-service
+  host_name               app_server
+  service_description     PING Check
+  check_command           check_ping!100.0,20%!500.0,60%
+}
+
+define service {
+  use                     generic-service
+  host_name               app_server
+  service_description     CPU Load
+  check_command           check_nrpe!check_load
+}
+
+define service {
+  use                     generic-service
+  host_name               app_server
+  service_description     Memory Usage
+  check_command           check_nrpe!check_mem
+}
+
+define service {
+  use                     generic-service
+  host_name               app_server
+  service_description     Disk Usage
+  check_command           check_nrpe!check_disk
+}
+
+define service {
+  use                     generic-service
+  host_name               app_server
+  service_description     Backend API Health
+  check_command           check_nrpe!check_api
+}

@@ -1,0 +1,138 @@
+---
+- name: Install Nagios Core on Management Server
+  hosts: mgmt_server
+  become: yes
+
+  tasks:
+    # -------------------------------
+    # Install Dependencies
+    # -------------------------------
+    - name: Install dependencies
+      apt:
+        name:
+          - autoconf
+          - gcc
+          - libc6
+          - make
+          - apache2
+          - php
+          - libapache2-mod-php
+          - libgd-dev
+          - unzip
+          - wget
+        update_cache: yes
+        state: present
+
+    # -------------------------------
+    # Install Nagios Core
+    # -------------------------------
+    - name: Download Nagios Core 4.4.6
+      get_url:
+        url: https://assets.nagios.com/downloads/nagioscore/releases/nagios-4.4.6.tar.gz
+        dest: /tmp/nagios.tar.gz
+
+    - name: Extract Nagios
+      unarchive:
+        src: /tmp/nagios.tar.gz
+        dest: /tmp
+        remote_src: yes
+
+    - name: Compile & Install Nagios Core
+      shell: |
+        cd /tmp/nagios-4.4.6
+        ./configure --with-httpd-conf=/etc/apache2/sites-enabled
+        make all
+        make install-groups-users
+        usermod -a -G nagios www-data
+        make install
+        make install-daemoninit
+        make install-commandmode
+        make install-config
+        make install-webconf
+      args:
+        executable: /bin/bash
+
+    # -------------------------------
+    # Install Plugins
+    # -------------------------------
+    - name: Install Nagios Plugins
+      apt:
+        name: nagios-plugins
+        state: present
+
+    # -------------------------------
+    # Create Web Admin User
+    # -------------------------------
+    - name: "Set Nagios Web Admin Password (username: nagiosadmin)"
+      shell: htpasswd -b -c /usr/local/nagios/etc/htpasswd.users nagiosadmin admin
+      args:
+        executable: /bin/bash
+
+    - name: Restart Apache
+      service:
+        name: apache2
+        state: restarted
+        enabled: yes
+
+    # -------------------------------
+    # Add Servers Folder for Host Configs
+    # -------------------------------
+    - name: Create directory for host configs
+      file:
+        path: /usr/local/nagios/etc/servers
+        state: directory
+        mode: "0755"
+
+    - name: Enable server folder in nagios.cfg
+      lineinfile:
+        path: /usr/local/nagios/etc/nagios.cfg
+        regexp: "^#cfg_dir=/usr/local/nagios/etc/servers"
+        line: "cfg_dir=/usr/local/nagios/etc/servers"
+
+    # -------------------------------
+    # Add App Server Config
+    # -------------------------------
+    - name: Add app server config to Nagios
+      template:
+        src: templates/app_server.cfg.j2
+        dest: /usr/local/nagios/etc/servers/app_server.cfg
+        mode: "0644"
+
+    # -------------------------------
+    # ADD NRPE COMMAND (MANDATORY)
+    # -------------------------------
+    - name: Add NRPE check command to commands.cfg
+      blockinfile:
+        path: /usr/local/nagios/etc/objects/commands.cfg
+        block: |
+          define command{
+              command_name    check_nrpe
+              command_line    /usr/lib/nagios/plugins/check_nrpe -H $HOSTADDRESS$ -c $ARG1$
+          }
+
+    # -------------------------------
+    # VALIDATE NAGIOS CONFIG (VERY IMPORTANT)
+    # -------------------------------
+    - name: Validate Nagios configuration
+      shell: "/usr/local/nagios/bin/nagios -v /usr/local/nagios/etc/nagios.cfg"
+      register: nagios_validation
+      ignore_errors: true
+
+    - name: Show validation output if failed
+      debug:
+        var: nagios_validation.stdout_lines
+      when: nagios_validation.rc != 0
+
+    # -------------------------------
+    # Restart ONLY IF VALID
+    # -------------------------------
+    - name: Restart Nagios safely
+      service:
+        name: nagios
+        state: restarted
+      when: nagios_validation.rc == 0
+
+    - name: Fail if Nagios validation failed
+      fail:
+        msg: "Nagios configuration invalid. Fix configs."
+      when: nagios_validation.rc != 0
