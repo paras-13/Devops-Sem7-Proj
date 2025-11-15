@@ -36,6 +36,20 @@ define service {
 define service {
   use                     generic-service
   host_name               app_server
+  service_description     NGINX Web Server
+  check_command           check_nrpe!check_nginx
+}
+
+define service {
+  use                     generic-service
+  host_name               app_server
+  service_description     Node.js Backend Port
+  check_command           check_nrpe!check_node
+}
+
+define service {
+  use                     generic-service
+  host_name               app_server
   service_description     Backend API Health
   check_command           check_nrpe!check_api
 }

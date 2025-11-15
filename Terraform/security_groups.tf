@@ -1,93 +1,99 @@
+###############################################
+# APP SERVER SECURITY GROUP (Fully Open)
+###############################################
+
 resource "aws_security_group" "app_server_sg" {
-name = "app-server-sg"
-description = "Allows traffic for the main application"
+  name = "app-server-sg"
 
-ingress {
-description = "HTTP access for users"
-from_port = 80
-to_port = 80
-protocol = "tcp"
-cidr_blocks = ["0.0.0.0/0"]
+  # Prevent Terraform from destroying it (EC2 uses it)
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  # Allow ALL inbound traffic (for your project/demo)
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Allow ALL outbound traffic
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { 
+    Name = "App-Server-SG" 
+  }
 }
 
-ingress {
-description = "SSH access for you and Ansible (Allowing from 0.0.0.0/0 - WARNING: Less Secure)"
-from_port = 22
-to_port = 22
-protocol = "tcp"
-cidr_blocks = ["0.0.0.0/0"]
-}
-
-# Puppet + Nagios allowed from mgmt server's private IP range (10.0.0.0/16)
-ingress {
-description = "Puppet + Nagios access from management subnet"
-from_port = 5666
-to_port = 8140
-protocol = "tcp"
-cidr_blocks = ["10.0.0.0/16"]
-}
-
-egress {
-description = "Allow all outbound traffic"
-from_port  = 0
-to_port = 0
-protocol = "-1"
-cidr_blocks = ["0.0.0.0/0"]
-}
-
-tags = { Name = "App-Server-SG" }
-}
-
+###############################################
+# MGMT SERVER (Nagios) SECURITY GROUP
+###############################################
 
 resource "aws_security_group" "mgmt_server_sg" {
-name = "mgmt-server-sg"
-description = "Allows traffic for management tools"
+  name = "mgmt-server-sg"
 
-ingress {
-description = "SSH access for you (Allowing from 0.0.0.0/0 - WARNING: Less Secure)"
-from_port = 22
-to_port = 22
-protocol = "tcp"
-cidr_blocks = ["0.0.0.0/0"]
+  # Prevent Terraform from destroying it (EC2 uses it)
+  lifecycle {
+    prevent_destroy = true
+  }
+
+  # Allow ALL inbound traffic
+  ingress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # Allow ALL outbound traffic
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { 
+    Name = "Mgmt-Server-SG" 
+  }
 }
 
-ingress {
-description = "Nagios Web UI"
-from_port= 80
-to_port = 80
-protocol = "tcp"
-cidr_blocks = ["0.0.0.0/0"] # You could also change this to 0.0.0.0/0 if your IP changes
-}
-
-egress {
-description = "Allow all outbound traffic"
-from_port = 0
-to_port = 0
-protocol = "-1"
-cidr_blocks = ["0.0.0.0/0"]
-}
-
-tags = { Name = "Mgmt-Server-SG" }
-}
+###############################################
+# RDS DATABASE SECURITY GROUP
+###############################################
 
 resource "aws_security_group" "rds_database_sg" {
-name = "rds-database-sg"
-description = "Allows MySQL traffic only from the App Server"
+  name = "rds-database-sg"
 
-ingress {
-description = "Allow MySQL from App Server"
-from_port = 3306
-to_port = 3306
-protocol = "tcp"
-security_groups = [aws_security_group.app_server_sg.id]
-}
+  # Allow Terraform to replace it safely if needed
+  lifecycle {
+    create_before_destroy = true
+  }
 
-egress {
-from_port = 0
-to_port = 0
-protocol = "-1"
-cidr_blocks = ["0.0.0.0/0"]
-}
+  # Allow MySQL traffic only from App Server
+  ingress {
+    description     = "Allow MySQL from App Server"
+    from_port       = 3306
+    to_port         = 3306
+    protocol        = "tcp"
+    security_groups = [aws_security_group.app_server_sg.id]
+  }
 
-tags = { Name = "RDS-Database-SG" }
+  # Allow outbound
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = { 
+    Name = "RDS-Database-SG" 
+  }
 }

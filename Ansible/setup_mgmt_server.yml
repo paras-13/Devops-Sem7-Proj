@@ -4,135 +4,173 @@
   become: yes
 
   tasks:
-    # -------------------------------
-    # Install Dependencies
-    # -------------------------------
     - name: Install dependencies
       apt:
+        update_cache: yes
+        state: present
         name:
           - autoconf
           - gcc
           - libc6
           - make
+          - wget
+          - unzip
           - apache2
           - php
           - libapache2-mod-php
           - libgd-dev
-          - unzip
-          - wget
-        update_cache: yes
-        state: present
+          - build-essential
+          - libssl-dev
+          - libmcrypt-dev
+          - bc
+          - gawk
+          - dc
+          - snmp
+          - libnet-snmp-perl
+          - gettext
+          - apache2-utils
+          - nagios-nrpe-plugin
 
-    # -------------------------------
-    # Install Nagios Core
-    # -------------------------------
-    - name: Download Nagios Core 4.4.6
+    - name: Download Nagios
       get_url:
-        url: https://assets.nagios.com/downloads/nagioscore/releases/nagios-4.4.6.tar.gz
+        url: "https://assets.nagios.com/downloads/nagioscore/releases/nagios-4.4.6.tar.gz"
         dest: /tmp/nagios.tar.gz
 
     - name: Extract Nagios
       unarchive:
         src: /tmp/nagios.tar.gz
-        dest: /tmp
+        dest: /tmp/
         remote_src: yes
 
-    - name: Compile & Install Nagios Core
-      shell: |
-        cd /tmp/nagios-4.4.6
-        ./configure --with-httpd-conf=/etc/apache2/sites-enabled
-        make all
-        make install-groups-users
-        usermod -a -G nagios www-data
-        make install
-        make install-daemoninit
-        make install-commandmode
-        make install-config
-        make install-webconf
+    - name: Configure Nagios
+      command: ./configure --with-httpd-conf=/etc/apache2/sites-enabled
       args:
-        executable: /bin/bash
+        chdir: /tmp/nagios-4.4.6
+        creates: /tmp/nagios-4.4.6/Makefile
 
-    # -------------------------------
-    # Install Plugins
-    # -------------------------------
-    - name: Install Nagios Plugins
-      apt:
-        name: nagios-plugins
+    - name: Compile Nagios
+      command: make all
+      args:
+        chdir: /tmp/nagios-4.4.6
+
+    - name: Create Nagios group
+      group:
+        name: nagios
         state: present
 
-    # -------------------------------
-    # Create Web Admin User
-    # -------------------------------
-    - name: "Set Nagios Web Admin Password (username: nagiosadmin)"
-      shell: htpasswd -b -c /usr/local/nagios/etc/htpasswd.users nagiosadmin admin
+    - name: Create Nagios user and assign to group
+      user:
+        name: nagios
+        group: nagios
+        home: /usr/local/nagios
+        shell: /bin/false
+        state: present
+
+    - name: Install Nagios Core
+      command: make install
       args:
-        executable: /bin/bash
+        chdir: /tmp/nagios-4.4.6
 
-    - name: Restart Apache
-      service:
-        name: apache2
-        state: restarted
-        enabled: yes
+    - name: Install Nagios configuration files
+      command: make install-config
+      args:
+        chdir: /tmp/nagios-4.4.6
 
-    # -------------------------------
-    # Add Servers Folder for Host Configs
-    # -------------------------------
-    - name: Create directory for host configs
+    - name: Install Nagios web config
+      command: make install-webconf
+      args:
+        chdir: /tmp/nagios-4.4.6
+
+    - name: Set correct ownership on Nagios config files
+      file:
+        path: /usr/local/nagios/etc
+        owner: nagios
+        group: nagios
+        recurse: yes
+        state: directory
+
+    - name: Install Nagios service script (init/systemd)
+      command: make install-init
+      args:
+        chdir: /tmp/nagios-4.4.6
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Enable Apache CGI module
+      command: a2enmod cgi
+      notify: Restart Apache
+
+    - name: Set Nagios admin password
+      command: htpasswd -b -c /usr/local/nagios/etc/htpasswd.users nagiosadmin admin
+
+    - name: Create directory for server configs
       file:
         path: /usr/local/nagios/etc/servers
         state: directory
-        mode: "0755"
+        owner: nagios
+        group: nagios
 
-    - name: Enable server folder in nagios.cfg
+    - name: Enable folder in nagios.cfg
       lineinfile:
         path: /usr/local/nagios/etc/nagios.cfg
-        regexp: "^#cfg_dir=/usr/local/nagios/etc/servers"
         line: "cfg_dir=/usr/local/nagios/etc/servers"
+        insertafter: EOF
 
-    # -------------------------------
-    # Add App Server Config
-    # -------------------------------
-    - name: Add app server config to Nagios
-      template:
-        src: templates/app_server.cfg.j2
-        dest: /usr/local/nagios/etc/servers/app_server.cfg
-        mode: "0644"
-
-    # -------------------------------
-    # ADD NRPE COMMAND (MANDATORY)
-    # -------------------------------
-    - name: Add NRPE check command to commands.cfg
+    - name: Add NRPE command definition
       blockinfile:
         path: /usr/local/nagios/etc/objects/commands.cfg
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - check_nrpe"
         block: |
-          define command{
+          define command {
               command_name    check_nrpe
-              command_line    /usr/lib/nagios/plugins/check_nrpe -H $HOSTADDRESS$ -c $ARG1$
+              command_line    $USER1$/check_nrpe -H $HOSTADDRESS$ -c $ARG1$
           }
 
-    # -------------------------------
-    # VALIDATE NAGIOS CONFIG (VERY IMPORTANT)
-    # -------------------------------
-    - name: Validate Nagios configuration
-      shell: "/usr/local/nagios/bin/nagios -v /usr/local/nagios/etc/nagios.cfg"
-      register: nagios_validation
-      ignore_errors: true
+    - name: Allow external access to Nagios Web UI
+      lineinfile:
+        path: /etc/apache2/sites-enabled/nagios.conf
+        regexp: '^\s*Require local'
+        line: "    Require all granted"
+      notify: Restart Apache
 
-    - name: Show validation output if failed
-      debug:
-        var: nagios_validation.stdout_lines
-      when: nagios_validation.rc != 0
+    - name: Generate App Server config
+      template:
+        src: "app_server.cfg.j2"
+        dest: "/usr/local/nagios/etc/servers/app_server.cfg"
+      notify: Verify and Restart Nagios
 
-    # -------------------------------
-    # Restart ONLY IF VALID
-    # -------------------------------
-    - name: Restart Nagios safely
-      service:
+    - name: Verify Nagios configuration
+      command: /usr/local/nagios/bin/nagios -v /usr/local/nagios/etc/nagios.cfg
+
+    - name: Start and enable Nagios
+      systemd:
         name: nagios
-        state: restarted
-      when: nagios_validation.rc == 0
+        state: started
+        enabled: yes
 
-    - name: Fail if Nagios validation failed
-      fail:
-        msg: "Nagios configuration invalid. Fix configs."
-      when: nagios_validation.rc != 0
+    - name: Start and enable Apache
+      systemd:
+        name: apache2
+        state: started
+        enabled: yes
+
+  handlers:
+    - name: Restart Apache
+      block:
+        - name: Validate Apache configuration
+          command: apachectl configtest
+        - name: Restart Apache service
+          systemd:
+            name: apache2
+            state: restarted
+
+    - name: Verify and Restart Nagios
+      block:
+        - name: Verify Nagios Configuration
+          command: /usr/local/nagios/bin/nagios -v /usr/local/nagios/etc/nagios.cfg
+        - name: Restart Nagios
+          systemd:
+            name: nagios
+            state: restarted

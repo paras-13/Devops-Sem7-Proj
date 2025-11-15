@@ -2,3 +2,5 @@ command[check_load]=/usr/lib/nagios/plugins/check_load -w 5 -c 10
 command[check_disk]=/usr/lib/nagios/plugins/check_disk -w 20% -c 10% -p /
 command[check_nginx]=/usr/lib/nagios/plugins/check_http -H localhost -p 80
 command[check_node]=/usr/lib/nagios/plugins/check_http -H localhost -p 8800
+command[check_mem]=/usr/lib/nagios/plugins/check_mem -w 20 -c 10
+command[check_api]=/usr/lib/nagios/plugins/check_http -H localhost -p 8800 -u /health

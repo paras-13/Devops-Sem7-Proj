@@ -2,4 +2,4 @@
 65.0.61.206 ansible_user=ubuntu ansible_ssh_private_key_file=/home/coder5041/paras.pem
 
 [mgmt_server]
-65.1.134.97 ansible_user=ubuntu ansible_ssh_private_key_file=/home/coder5041/paras.pem
+43.204.231.242 ansible_user=ubuntu ansible_ssh_private_key_file=/home/coder5041/paras.pem

@@ -1,0 +1,43 @@
+---
+- name: Setup NRPE on App Server
+  hosts: app_server
+  become: yes
+
+  vars:
+    nagios_server_ip: "43.204.231.242"
+
+  tasks:
+    - name: Install NRPE & plugins
+      apt:
+        update_cache: yes
+        state: present
+        name:
+          - nagios-nrpe-server
+          - nagios-plugins
+          - nagios-plugins-contrib
+
+    - name: Deploy NRPE local.cfg
+      template:
+        src: "nrpe_local.cfg.j2"
+        dest: /etc/nagios/nrpe.d/local.cfg
+      notify: Restart NRPE
+
+    - name: Set allowed_hosts in nrpe.cfg
+      lineinfile:
+        path: /etc/nagios/nrpe.cfg
+        regexp: "^#?allowed_hosts="
+        line: "allowed_hosts=127.0.0.1,{{ nagios_server_ip }}"
+      notify: Restart NRPE
+
+    - name: Ensure include_dir for custom NRPE commands is enabled
+      lineinfile:
+        path: /etc/nagios/nrpe.cfg
+        regexp: "^#?include_dir=/etc/nagios/nrpe.d"
+        line: "include_dir=/etc/nagios/nrpe.d"
+      notify: Restart NRPE
+
+  handlers:
+    - name: Restart NRPE
+      systemd:
+        name: nagios-nrpe-server
+        state: restarted
